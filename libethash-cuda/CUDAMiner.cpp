@@ -110,7 +110,8 @@ bool CUDAMiner::initEpoch_internal()
             }
 
             cudalog << "Generating DAG + Light : "
-                    << dev::getFormattedMemory((double)RequiredMemory);
+                    << dev::getFormattedMemory((double)RequiredMemory)
+                    << " memory required";
 
             // create buffer for cache
             CUDA_SAFE_CALL(
@@ -130,24 +131,38 @@ bool CUDAMiner::initEpoch_internal()
         else
         {
             cudalog << "Generating DAG + Light (reusing buffers): "
-                    << dev::getFormattedMemory((double)RequiredMemory);
+                    << dev::getFormattedMemory((double)RequiredMemory)
+                    << " memory required";
             get_constants(&m_dag, NULL, &m_light, NULL);
         }
-
-        CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(m_light), m_epochContext.lightCache,
-            m_epochContext.lightSize, cudaMemcpyHostToDevice));
 
         set_constants(m_dag, m_epochContext.dagNumItems, m_light,
             m_epochContext.lightNumItems);  // in ethash_cuda_miner_kernel.cu
 
+        auto lightGenStart = std::chrono::steady_clock::now();
+        CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(m_light), m_epochContext.lightCache,
+            m_epochContext.lightSize, cudaMemcpyHostToDevice));
+
+        auto dagGenStart = std::chrono::steady_clock::now();
         ethash_generate_dag(
             m_epochContext.dagSize, m_settings.gridSize, m_settings.blockSize, m_streams[0]);
 
-        cudalog << "Generated DAG + Light in "
+        cudalog << "Generated DAG ("
+                << std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - dagGenStart).count()
+                << " ms) + Light ("
+                << std::chrono::duration_cast<std::chrono::milliseconds>(
+                       dagGenStart - lightGenStart)
+                       .count()
+                << " ms) in "
+                << std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - lightGenStart)
+                       .count()
+                << " ms. (Total initialzing time: "
                 << std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::steady_clock::now() - startInit)
                        .count()
-                << " ms. "
+                << " ms.) "
                 << dev::getFormattedMemory(
                        (double)(m_deviceDescriptor.totalMemory - RequiredMemory))
                 << " left.";
